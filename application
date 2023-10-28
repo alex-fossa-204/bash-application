@@ -1,0 +1,118 @@
+#!/bin/bash
+
+if [[ -f "./env.sh" ]]; then
+	echo "Using environment config file to populate var: location=${PWD}/env.sh"
+	source ./env.sh
+else
+	echo "Using default environment configuration"
+fi
+
+workDir="${WORKING_DIRECTORY:=~/Workspace}"
+
+#docker database configuration variables
+databaseContainerName="${DB_CONTAINER_NAME:="postgres-container"}"
+databasePassword="${DB_PASSWORD:="pass"}"
+databaseUser="${DB_USER:="postgres"}"
+databaseName="${DB_NAME:="postgres"}"
+databasePort="${DB_PORT:="5433:5432"}"
+
+build() {
+
+	echo "Starting build process..."
+	cd "${workDir}/spring-starter" || exit
+	
+	./gradlew clean
+
+	if [[ "$1" = "-skipTests" ]] || ./gradlew test; then
+		echo "Application is building"
+		./gradlew bootJar
+	else
+		echo "Tests failed. Look for test report or pass arg -skipTests"
+	fi
+}
+
+up() {
+
+	cd "${workDir}/spring-starter/build/libs" || exit
+	java -jar spring-starter-*.jar
+
+}
+
+clean() {
+
+	# remove work directory
+	echo "Cleaning working directory: ${workDir}"
+	rm -rf "${workDir}"
+	
+	if docker ps | grep "${databaseContainerName}"; then
+		echo "Stopping docker container: ${databaseContainerName}"
+		docker container stop "${databaseContainerName}"
+	fi
+}
+
+help() {
+echo "
+  Usage:
+    ./applicaiton init - init working directory and database
+    ./application clean - clean working directory
+    ./application build - run JUnit tests to check app stability (-skipTests arg to skip tests) and build application jar
+    ./application up - launch application		
+"
+}
+
+
+init() {
+
+	# init working diretory
+	mkdir -p "${workDir}"
+	cd "${workDir}" || exit
+
+	# cloning spring-starter project
+	if [[ ! -d "spring-starter" ]]; then
+		echo "Trying to clone spring-starter project from git remote server"
+		
+		git clone git@github.com:dmdev2020/spring-starter.git
+		cd "spring-starter" || exit
+		git checkout lesson-125
+	fi
+
+	# PostgreSQL container setup
+	echo "Starting postgres image pulling process"
+	docker pull postgres
+
+	if docker ps -a | grep "${databaseContainerName}"; then
+		echo "Attempting to start docker container: ${databaseContainerName}"
+		docker start "${databaseContainerName}"
+	else
+		echo "Attempting to run new docker container: ${databaseContainerName}"
+		docker run --name "${databaseContainerName}" \
+			-e POSTGRES_PASSWORD="${databasePassword}" \
+			-e POSTGRES_USER="${databaseUser}" \
+			-p "${databasePort}" \
+			-d postgres
+	fi
+
+}
+
+
+case $1 in 
+	help)
+		help
+		;;
+	init)
+		init
+		;;
+	build)
+		build $2
+		;;
+	up)
+		up
+		;;
+	clean)
+		clean
+		;;
+	*)
+		echo "$1 command is not valid or not exists"
+		exit 1
+		;;
+esac
